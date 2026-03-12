@@ -4,81 +4,102 @@
 
 ---
 
-## 📖 What it Does
-1.  **Hardware Ingest**: An ESP23 with an INA219 sensor measures real-time Solar Voltage and Current.
-2.  **AI Verification**: Every reading is passed through an **Isolation Forest** ML model in the backend to ensure it's not a fraudulent "fake" injection.
-3.  **Blockchain Logging**: Verified data is signed and logged on a private Polygon (Hardhat) network.
-4.  **Incentive Layer**: Users earn **GreenCoins (GRN)** for their production, which can be redeemed for grid discounts or carbon certificates.
+## 🛠️ Installation Guide (First-Time Setup)
+
+### 📋 1. Prerequisites
+- **Node.js**: v18 or later
+- **Python**: **v3.11** (recommended for ML stability)
+- **Hardhat**: Global or local (included in dev dependencies)
+
+### 📥 2. Initial Setup
+```bash
+# Clone the repository
+git clone https://github.com/Chunnu-Munnu/Civitas-AI.git
+cd Civitas-AI
+
+# Install Blockchain dependencies
+cd Blockchain
+npm install
+
+# Install Frontend dependencies
+cd ../frontend
+npm install
+
+# Setup Python Environment
+cd ../backend
+python -m venv venv
+./venv/Scripts/activate  # Windows
+pip install -r requirements.txt
+```
 
 ---
 
-## 🛠️ Step-by-Step Setup Guide
+## 🚀 Execution Guide (Open 4 Terminals)
 
-### 📋 1. Prerequisites
-- **Node.js** (v18+)
-- **Python** (v3.10+)
-- **Hardhat** (for local blockchain)
+To get the full system running, you need to start four separate processes in order:
 
-### ⛓️ 2. Start the Blockchain (Node)
-In a new terminal:
+### ⛓️ Terminal 1: Local Blockchain (Hardhat)
+Start your private solar ledger node.
 ```bash
 cd Blockchain
-yarn install
 npx hardhat node
 ```
-*Note: This generates 20 test accounts. We will use the first one (Account #0) as our Admin.*
+*Note: This generates 20 test accounts. Account #0 is used by the system as the Admin.*
 
-### ⚙️ 3. Deploy Contract & Start API (Backend)
-In a second terminal:
+### ⚙️ Terminal 2: Smart Contract & Backend API
+Deploy the GreenCoin contract and start the solar verification engine.
 ```bash
-# Deploys the verification contract
+# 1. Deploy the contract
 cd Blockchain
 npx hardhat run scripts/deploy-civitas.js --network localhost
 
-# Start the Python API
+# 2. Start the FastAPI backend
 cd ../backend
-python -m venv venv
-./venv/Scripts/activate  # Windows: .\venv\Scripts\activate
-pip install -r requirements.txt
+./venv/Scripts/activate
 python main.py
 ```
+*Wait for: `📁 .env file loaded: True` and `Uvicorn running on http://127.0.0.1:8000`*
 
-### 💻 4. Launch the Portal (Frontend)
-In a third terminal:
+### 💻 Terminal 3: Solar Intelligence Portal (Frontend)
+Launch the interactive dashboard.
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 *Visit: [http://localhost:5174](http://localhost:5174)*
 
-### 📡 5. Feed the Data (Hardware / Emulator)
-In a fourth terminal:
+### 📡 Terminal 4: Data Feed (Emulator OR Real Hardware)
+Connect your data source to the blockchain.
 
-**Option A (With Hardware):**
-Plug in your ESP32. Check your COM port in Device Manager.
-Change `SERIAL_PORT` in `hardware/serial_reader.py` to your port (e.g., `COM3`).
-```bash
-cd hardware
-python serial_reader.py
-```
-
-**Option B (Emulator - No Hardware needed):**
+**Option A: Virtual Emulator (For Quick Demo)**
+No hardware needed. Mimics real solar traffic and random fraud attempts.
 ```bash
 cd hardware
 python hardware_emulator.py
 ```
 
+**Option B: Real Hardware (ESP32)**
+1. Connect ESP32 via USB.
+2. In `hardware/serial_reader.py`, set your COM port (e.g., `COM3`).
+3. Run:
+```bash
+cd hardware
+python serial_reader.py
+```
+
 ---
 
-## 🛡️ Admin & Audit Features
-- **Live Fraud Feed**: Go to the **Admin Portal** to see blocked anomalies in real-time.
-- **Export Audit**: Every transaction can be exported as a CSV file for government subsidies.
-- **On-Chain Trust**: Verify any reading by its Transaction Hash on the **Blockchain** page.
+## 💎 Key Features
+- **AI-Driven Trust**: Uses an **Isolation Forest** model to detect fraudulent voltage injections (meter manipulation) in real-time.
+- **Asynchronous Blockchain Logging**: High-speed data intake with background smart contract verification.
+- **Immutable Audit Feed**: Real-time transaction history on a local Polygon node.
+- **Government Audit Export**: Admin-side CSV export functionality for subsidy verification and compliance.
+- **Solar Feasibility Check**: Cross-verifies logged data with time-of-day irradiance constraints.
 
 ---
 
 ## 👨‍💻 Submission Details
 - **Team**: VisionX
+- **Developed for**: Green Fintech Hackathon 2026
 - **Repo**: [https://github.com/Chunnu-Munnu/Civitas-AI](https://github.com/Chunnu-Munnu/Civitas-AI)
-- **Status**: Production Ready for Hackathon Demo.
+- **Sustainability Focus**: Incentivizing household-level solar adoption through decentralized fractional rewards.
