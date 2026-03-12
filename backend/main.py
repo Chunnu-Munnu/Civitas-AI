@@ -108,12 +108,7 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.get("/api/dashboard/{wallet_address}")
-def get_dashboard(wallet_address: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.wallet_address == wallet_address).first()
-    if not user:
-        # Auto-create user for demo convenience
-        pass
-        
+def get_dashboard(wallet_address: str):
     # DEMO FALLBACK: Return mocked fluctuating data instead of hitting DB
     import random
     
