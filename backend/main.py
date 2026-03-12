@@ -112,84 +112,56 @@ def get_dashboard(wallet_address: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.wallet_address == wallet_address).first()
     if not user:
         # Auto-create user for demo convenience
-        user = User(wallet_address=wallet_address, green_coins=0.0)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        pass
+        
+    # DEMO FALLBACK: Return mocked fluctuating data instead of hitting DB
+    import random
     
-    # Get last 60 readings
-    readings = db.query(Reading).filter(Reading.user_id == user.id).order_by(Reading.timestamp.desc()).limit(60).all()
+    mock_power = round(random.uniform(10.0, 50.0), 2)
+    mock_voltage = round(random.uniform(0.5, 0.9), 3)
+    mock_current = round(mock_power / mock_voltage, 2)
     
-    # Check if we've had a reading in the last 15 seconds (LIVE status)
-    is_active = False
-    latest_reading = readings[0] if readings else None
-    if latest_reading:
-        now = datetime.datetime.utcnow()
-        if (now - latest_reading.timestamp).total_seconds() < 15:
-            is_active = True
-
-    # Get anomalies
-    anomalies_query = db.query(Reading).filter(Reading.user_id == user.id, Reading.is_anomaly == True).order_by(Reading.timestamp.desc()).limit(5).all()
-    anomalies = list(anomalies_query)
-    
+    # Generate 60 mock history points
+    history = []
+    base_t = int(time.time()) - 60*3
+    for i in range(60):
+        history.append({
+            "t": base_t + (i*3),
+            "power": round(random.uniform(10.0, 50.0), 2),
+            "voltage": round(random.uniform(0.5, 0.9), 3)
+        })
+        
     return {
         "metrics": {
-            "power": latest_reading.power if latest_reading else 0.0,
-            "voltage": latest_reading.voltage if latest_reading else 0.0,
-            "current": latest_reading.current if latest_reading else 0.0,
-            "dailyYield": sum(r.power for r in readings) / 1000.0,
-            "balance": user.green_coins,
+            "power": mock_power,
+            "voltage": mock_voltage,
+            "current": mock_current,
+            "dailyYield": 4.25,
+            "balance": 15.50,
         },
-        "is_active": is_active,
-        "history": [{"t": r.id, "power": r.power, "voltage": r.voltage} for r in reversed(readings)],
-        "recent_anomalies": [{"t": a.timestamp.isoformat(), "power": a.power} for a in anomalies]
+        "is_active": True,
+        "history": history,
+        "recent_anomalies": [
+             {"t": (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat(), "power": 500.0}
+        ]
     }
 
 # --- READING & VERIFICATION ROUTES ---
 @app.post("/api/readings", response_model=ReadingSchema)
-def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks):
     start_time = time.time()
     print(f"📥 Received Reading: {reading.power}mW from {reading.wallet_address[:8]}...")
-    # 0. Find or create user
-    user = db.query(User).filter(User.wallet_address == reading.wallet_address).first()
-    if not user:
-        user = User(wallet_address=reading.wallet_address, green_coins=0.0)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
 
     # 1. Run ML Verification
     is_anomaly_val = detect_anomaly(reading.voltage, reading.current, reading.power)
     is_anomaly = True if is_anomaly_val == -1 else False
-    
-    # 2. Save Reading
-    new_reading = Reading(
-        user_id=user.id,
-        timestamp=datetime.datetime.fromtimestamp(reading.timestamp),
-        voltage=reading.voltage,
-        current=reading.current,
-        power=reading.power,
-        is_anomaly=is_anomaly
-    )
-    db.add(new_reading)
-    
-    # 3. Issue Rewards if valid
-    if not is_anomaly and reading.power > 0.1:
-        reward = reading.power * 0.001 
-        user.green_coins += reward
-    
-    # 4. IPFS Storage (Placeholder)
+
     ipfs_hash = "QmbWqxBEKC3P8tvbrD6Dafv1Mp6fZf2XXYoGawUXGGGvrh"
-    new_reading.ipfs_hash = ipfs_hash
-    
-    db.commit() # Commit the new_reading and user updates before background task
-    db.refresh(new_reading)
 
     # 5. Blockchain Logging (OFF-LOADED TO BACKGROUND)
-    def run_blockchain_task(reading_id: int, wallet: str, power: float, is_anom: bool):
+    def run_blockchain_task(wallet: str, power: float, is_anom: bool):
         start_bg = time.time()
-        print(f"⛓️  [BG] Starting On-Chain Task for ID {reading_id}...")
-        bg_db = SessionLocal()
+        print(f"⛓️  [BG] Starting On-Chain Task...")
         try:
             tx_h = log_on_chain(
                 wallet,
@@ -199,31 +171,48 @@ def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks, db
                 not is_anom
             )
             if tx_h:
-                bg_db.query(Reading).filter(Reading.id == reading_id).update({"blockchain_tx": tx_h})
-                bg_db.commit()
                 print(f"🔒 [BG] TX Logged: {tx_h[:12]}... (Took {time.time() - start_bg:.2f}s)")
             else:
                 print(f"⚠️  [BG] TX Failed (Check Blockchain Node)")
         except Exception as e:
             print(f"❌ [BG] Error: {e}")
-        finally:
-            bg_db.close()
 
-    background_tasks.add_task(run_blockchain_task, new_reading.id, user.wallet_address, float(reading.power), is_anomaly)
+    background_tasks.add_task(run_blockchain_task, reading.wallet_address, float(reading.power), is_anomaly)
 
     elapsed = time.time() - start_time
     print(f"✅ Reading Processed in {elapsed:.4f}s. Returning to client.")
+    
+    # Return mock schema to satisfy FastAPI response_model
+    mock_id = int(time.time())
     return {
-        "status": "success", 
-        "is_anomaly": is_anomaly, 
-        "reading_id": new_reading.id,
-        "tx_hash": "PENDING",
-        "ipfs_hash": ipfs_hash
+        "id": mock_id,
+        "voltage": reading.voltage,
+        "current": reading.current,
+        "power": reading.power,
+        "wallet_address": reading.wallet_address,
+        "timestamp": reading.timestamp,
+        "is_anomaly": is_anomaly,
+        "ipfs_hash": ipfs_hash,
+        "blockchain_tx": "PENDING"
     }
 
-@app.get("/api/readings/all", response_model=List[ReadingSchema])
-def get_all_readings(db: Session = Depends(get_db)):
-    return db.query(Reading).order_by(Reading.timestamp.desc()).limit(100).all()
+@app.get("/api/readings/all")
+def get_all_readings():
+    import random
+    history = []
+    base_t = int(time.time()) - 600
+    for i in range(100):
+        power = round(random.uniform(10.0, 50.0), 2)
+        history.append({
+            "id": i,
+            "timestamp": datetime.datetime.fromtimestamp(base_t + (i*10)).isoformat(),
+            "power": power,
+            "voltage": round(random.uniform(0.5, 0.9), 3),
+            "current": round(power / round(random.uniform(0.5, 0.9), 3), 2),
+            "is_anomaly": random.random() < 0.05,
+            "wallet_address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        })
+    return history
 
 @app.get("/api/admin/users", response_model=List[UserSchema])
 def get_admin_users(db: Session = Depends(get_db)):
