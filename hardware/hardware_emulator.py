@@ -32,17 +32,19 @@ while True:
         "timestamp": time.time()
     }
 
+    print(f"📡 Attempting to send reading: {v}V, {p}mW...", end="\r")
+
     try:
-        res = requests.post(API_URL, json=payload)
+        res = requests.post(API_URL, json=payload, timeout=5)
         if res.status_code != 200:
-            print(f"❌ Server Error {res.status_code}: {res.text}")
+            print(f"\n❌ Server Error {res.status_code}: {res.text}")
             continue
             
         data = res.json()
-        status = "✅" if not data.get("is_anomaly") else "🚩"
+        status = "✅ Verified" if not data.get("is_anomaly") else "🚩 ANOMALY"
         tx = data.get("tx_hash") or "PENDING"
-        print(f"{status} Sending: {v}V | {p}mW | On-Chain: {tx[:12]}...")
+        print(f"\n{status} | P: {p}mW | TX: {tx[:12]}...")
     except Exception as e:
-        print(f"❌ Connection Error: {e}")
+        print(f"\n❌ Connection Error: {e}")
 
-    time.sleep(3) # Send every 3 seconds
+    time.sleep(3) 

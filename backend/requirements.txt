@@ -11,3 +11,4 @@ python-jose[cryptography]
 passlib[bcrypt]
 paho-mqtt
 web3
+python-dotenv

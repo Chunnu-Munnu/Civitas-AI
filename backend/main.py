@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import uvicorn
@@ -20,11 +20,22 @@ w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # Load keys from .env
 from dotenv import load_dotenv
-load_dotenv()
+env_loaded = load_dotenv()
+print(f"📁 .env file loaded: {env_loaded}")
 
 # Admin key for on-chain verification
-PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY", "0x0000000000000000000000000000000000000000000000000000000000000000")
-ACCOUNT_ADDRESS = w3.eth.account.from_key(PRIVATE_KEY).address if PRIVATE_KEY != "0x0000000000000000000000000000000000000000000000000000000000000000" else None
+PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY")
+if not PRIVATE_KEY:
+    print("⚠️ WARNING: ADMIN_PRIVATE_KEY not found in .env! Blockchain logging will fail.")
+    PRIVATE_KEY = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+ACCOUNT_ADDRESS = None
+if PRIVATE_KEY != "0x0000000000000000000000000000000000000000000000000000000000000000":
+    try:
+        ACCOUNT_ADDRESS = w3.eth.account.from_key(PRIVATE_KEY).address
+        print(f"🔗 Blockchain Admin Address: {ACCOUNT_ADDRESS}")
+    except Exception as e:
+        print(f"❌ Error loading PRIVATE_KEY: {e}")
 
 # Contract ABIs & Addresses (from deployedAddress.json)
 try:
@@ -130,8 +141,8 @@ def get_dashboard(wallet_address: str, db: Session = Depends(get_db)):
     }
 
 # --- READING & VERIFICATION ROUTES ---
-@app.post("/api/readings")
-def post_reading(reading: ReadingCreate, db: Session = Depends(get_db)):
+@app.post("/api/readings", response_model=ReadingSchema)
+def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     # 0. Find or create user
     user = db.query(User).filter(User.wallet_address == reading.wallet_address).first()
     if not user:
@@ -157,36 +168,44 @@ def post_reading(reading: ReadingCreate, db: Session = Depends(get_db)):
     
     # 3. Issue Rewards if valid
     if not is_anomaly and reading.power > 0.1:
-        user = db.query(User).filter(User.id == reading.user_id).first()
-        if user:
-            reward = reading.power * 0.001 # Logic from original main.py
-            user.green_coins += reward
+        reward = reading.power * 0.001 
+        user.green_coins += reward
     
     # 4. IPFS Storage (Placeholder)
     ipfs_hash = "QmbWqxBEKC3P8tvbrD6Dafv1Mp6fZf2XXYoGawUXGGGvrh"
     new_reading.ipfs_hash = ipfs_hash
     
-    # 5. Blockchain Logging (REAL TRANSACTION)
-    tx_hash = None
-    try:
-        tx_hash = log_on_chain(
-            user.wallet_address,
-            reading.power,
-            int(time.time()),
-            ipfs_hash,
-            not is_anomaly
-        )
-        new_reading.blockchain_tx = tx_hash
-    except Exception as e:
-        print(f"Blockchain Error: {e}")
-
-    db.commit()
+    db.commit() # Commit the new_reading and user updates before background task
     db.refresh(new_reading)
+
+    # 5. Blockchain Logging (OFF-LOADED TO BACKGROUND)
+    def run_blockchain_task(reading_id: int, wallet: str, power: float, is_anom: bool):
+        # Create a new DB session for the background task
+        bg_db = SessionLocal()
+        try:
+            tx_h = log_on_chain(
+                wallet,
+                power,
+                int(time.time()),
+                "QmbWqxBEKC3P8tvbrD6Dafv1Mp6fZf2XXYoGawUXGGGvrh",
+                not is_anom
+            )
+            # Update the record with the TX hash
+            bg_db.query(Reading).filter(Reading.id == reading_id).update({"blockchain_tx": tx_h})
+            bg_db.commit()
+            print(f"🔒 On-Chain Verification Logged: {tx_h[:12]}...")
+        except Exception as e:
+            print(f"❌ Blockchain Background Error: {e}")
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(run_blockchain_task, new_reading.id, user.wallet_address, reading.power, is_anomaly)
+
     return {
         "status": "success", 
         "is_anomaly": is_anomaly, 
         "reading_id": new_reading.id,
-        "tx_hash": tx_hash,
+        "tx_hash": "PENDING",
         "ipfs_hash": ipfs_hash
     }
 
