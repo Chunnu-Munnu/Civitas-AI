@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+scikit-learn
+numpy
+joblib
+requests
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+paho-mqtt
+web3

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tourist Registration | Saathi Blockchain</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      padding: 35px 40px;
+      border-radius: 16px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+      width: 100%;
+      max-width: 500px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      color: #1565c0;
+      margin-bottom: 25px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      text-align: left;
+    }
+
+    label {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 5px;
+      color: #333;
+    }
+
+    input {
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+
+    button {
+      background-color: #1976d2;
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 15px;
+    }
+
+    button:hover {
+      background-color: #0d47a1;
+    }
+
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 15px;
+      font-weight: 600;
+      padding: 10px;
+      border-radius: 6px;
+    }
+
+    .success-box {
+      background: #e8f5e9;
+      border: 2px solid #4caf50;
+      color: #2e7d32;
+    }
+
+    .error-box {
+      background: #ffebee;
+      border: 2px solid #f44336;
+      color: #c62828;
+    }
+
+    .info-box {
+      background: #e3f2fd;
+      border: 2px solid #2196f3;
+      color: #1565c0;
+    }
+
+    .footer {
+      margin-top: 20px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .data-display {
+      display: none;
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+      text-align: left;
+    }
+
+    .data-display.show {
+      display: block;
+    }
+
+    .data-row {
+      margin-bottom: 12px;
+      padding: 10px;
+      background: white;
+      border-radius: 6px;
+      border-left: 4px solid #1976d2;
+    }
+
+    .data-label {
+      font-weight: 600;
+      color: #1565c0;
+      font-size: 13px;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .data-value {
+      color: #333;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2>Tourist Registration</h2>
+
+    <form id="registerForm">
+      <label for="fullName">Full Name</label>
+      <input type="text" id="fullName" placeholder="Enter full name" required>
+
+      <label for="nationality">Nationality</label>
+      <input type="text" id="nationality" placeholder="e.g. Indian" required>
+
+      <label for="emergencyContact">Emergency Contact</label>
+      <input type="text" id="emergencyContact" placeholder="+91 9876543210" required>
+
+      <label for="medicalInfo">Medical Information</label>
+      <input type="text" id="medicalInfo" placeholder="Blood Type: O+, Allergies: None" required>
+
+      <label for="embassyContact">Embassy Contact</label>
+      <input type="text" id="embassyContact" placeholder="Embassy name and phone" required>
+
+      <label for="passportHash">Passport / IPFS Hash</label>
+      <input type="text" id="passportHash" placeholder="QmX4e8f9...ABC123" required>
+
+      <button type="submit">Register on Blockchain</button>
+    </form>
+
+    <div id="status"></div>
+
+    <div class="data-display" id="dataDisplay">
+      <h3 style="color: #1565c0; margin-top: 0;">✅ Registered Data:</h3>
+      <div id="blockchainData"></div>
+    </div>
+
+    <div class="footer">Powered by Saathi Blockchain Network</div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+
+  <script>
+    // ============================
+    // Configuration
+    // ============================
+    const RPC_URL = "http://127.0.0.1:8545";
+    const CONTRACT_ADDRESS = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
+    const PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    const contractABI = [
+      "function registerTourist(string,string,string,string,string,string) public",
+      "function getTourist(address) public view returns (tuple(string passportHash,string fullName,string nationality,string emergencyContact,string medicalInfo,string embassyContact,uint256 registrationTime,bool isActive))"
+    ];
+
+    const form = document.getElementById("registerForm");
+    const status = document.getElementById("status");
+    const dataDisplay = document.getElementById("dataDisplay");
+    const blockchainData = document.getElementById("blockchainData");
+
+    let provider;
+    let wallet;
+    let contract;
+
+    // ============================
+    // Initialize Connection
+    // ============================
+    async function init() {
+      try {
+        provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+        wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+        contract = new ethers.Contract(CONTRACT_ADDRESS, contractABI, wallet);
+        
+        console.log("✅ Connected to Hardhat");
+        console.log("Wallet Address:", wallet.address);
+        
+        const balance = await provider.getBalance(wallet.address);
+        console.log("Balance:", ethers.utils.formatEther(balance), "ETH");
+        
+      } catch (error) {
+        console.error("Initialization error:", error);
+        status.className = "error-box";
+        status.innerHTML = "❌ Cannot connect to Hardhat node. Make sure it's running on port 8545";
+      }
+    }
+
+    // ============================
+    // Register Tourist
+    // ============================
+    async function registerTourist(e) {
+      e.preventDefault();
+      status.className = "info-box";
+      status.innerHTML = "⏳ Submitting to blockchain...";
+
+      try {
+        const data = {
+          passportHash: document.getElementById("passportHash").value,
+          fullName: document.getElementById("fullName").value,
+          nationality: document.getElementById("nationality").value,
+          emergencyContact: document.getElementById("emergencyContact").value,
+          medicalInfo: document.getElementById("medicalInfo").value,
+          embassyContact: document.getElementById("embassyContact").value
+        };
+
+        console.log("Sending transaction...");
+
+        const tx = await contract.registerTourist(
+          data.passportHash,
+          data.fullName,
+          data.nationality,
+          data.emergencyContact,
+          data.medicalInfo,
+          data.embassyContact
+        );
+
+        status.innerHTML = `⏳ Transaction sent: ${tx.hash.slice(0, 10)}... Waiting for confirmation...`;
+
+        const receipt = await tx.wait();
+        
+        console.log("✅ Transaction confirmed!");
+        console.log("Block Number:", receipt.blockNumber);
+        console.log("Gas Used:", receipt.gasUsed.toString());
+
+        status.className = "success-box";
+        status.innerHTML = "✅ Registration successful! Redirecting to trip planner...";
+
+        // Show the registered data
+        await displayRegisteredData();
+
+        // ✅ NEW ADDITION — Backend and Frontend Integration
+        // After blockchain registration, redirect user to main Saathi UI
+        setTimeout(() => {
+          window.location.href = "frontend_saathi_main.html";
+        }, 2500);
+
+      } catch (error) {
+        console.error("Registration error:", error);
+        status.className = "error-box";
+        
+        if (error.message.includes("insufficient funds")) {
+          status.innerHTML = "❌ Insufficient funds. Make sure Hardhat node is running.";
+        } else if (error.message.includes("CALL_EXCEPTION")) {
+          status.innerHTML = "❌ Contract error. Check if contract is deployed at the correct address.";
+        } else {
+          status.innerHTML = "❌ Error: " + (error.message || "Transaction failed");
+        }
+      }
+    }
+
+    // ============================
+    // Display Registered Data
+    // ============================
+    async function displayRegisteredData() {
+      try {
+        const tourist = await contract.getTourist(wallet.address);
+
+        if (!tourist.isActive) {
+          return;
+        }
+
+        const regDate = new Date(tourist.registrationTime.toNumber() * 1000);
+        
+        blockchainData.innerHTML = `
+          <div class="data-row">
+            <span class="data-label">Wallet Address</span>
+            <span class="data-value">${wallet.address}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Full Name</span>
+            <span class="data-value">${tourist.fullName}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Nationality</span>
+            <span class="data-value">${tourist.nationality}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Emergency Contact</span>
+            <span class="data-value">${tourist.emergencyContact}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Medical Info</span>
+            <span class="data-value">${tourist.medicalInfo}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Embassy Contact</span>
+            <span class="data-value">${tourist.embassyContact}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Passport/IPFS Hash</span>
+            <span class="data-value">${tourist.passportHash}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Registration Time</span>
+            <span class="data-value">${regDate.toLocaleString()}</span>
+          </div>
+        `;
+
+        dataDisplay.classList.add("show");
+
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    }
+
+    // ============================
+    // Event Listeners
+    // ============================
+    form.addEventListener("submit", registerTourist);
+
+    // Initialize on load
+    window.addEventListener("load", init);
+  </script>
+</body>
+</html>
