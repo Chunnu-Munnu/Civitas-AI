@@ -13,37 +13,43 @@ print(f"Target: {API_URL}")
 print("Mode: REAL-TIME BLOCKCHAIN LOGGING\n")
 
 while True:
-    # Simulate realistic solar fluctuations
+    # 1. Simulate realistic solar fluctuations
+    # Voltage: 0.5V to 0.9V (Low voltage solar cell)
     v = round(0.5 + random.uniform(0, 0.4), 3)
-    c = round(20 + random.uniform(0, 30), 1)
-    p = round(v * c, 2)
+    # Current: 20mA to 50mA (0.020A to 0.050A)
+    c_amps = round(0.02 + random.uniform(0, 0.03), 3)
+    # Power in Watts
+    p_watts = round(v * c_amps, 5)
     
     # 5% chance to simulate a fake grid injection (anomaly)
+    is_anomaly_fake = False
     if random.random() < 0.05:
         v = 24.5
-        p = 500.0
-        print("🚩 SIMULATING ANOMALY (24V Injection)")
+        p_watts = 0.5 # 500mW
+        is_anomaly_fake = True
+        print("\n🚩 SIMULATING ANOMALY (24V Injection detected)")
 
     payload = {
         "wallet_address": WALLET,
         "voltage": v,
-        "current": c,
-        "power": p,
+        "current": c_amps,
+        "power": p_watts,
         "timestamp": time.time()
     }
 
-    print(f"📡 Attempting to send reading: {v}V, {p}mW...", end="\r")
+    print(f"📡 Sending: {v}V | {c_amps*1000:.1f}mA | {p_watts*1000:.2f}mW...", end="\r")
 
     try:
-        res = requests.post(API_URL, json=payload, timeout=5)
+        # Increased timeout to 30s as backend might be busy with blockchain
+        res = requests.post(API_URL, json=payload, timeout=30)
         if res.status_code != 200:
             print(f"\n❌ Server Error {res.status_code}: {res.text}")
-            continue
+        else:
+            data = res.json()
+            status = "✅ Verified" if not data.get("is_anomaly") else "🚩 ANOMALY"
+            tx = status if not data.get("is_anomaly") else "BLOCKED"
+            print(f"\n{status} | Power: {p_watts*1000:.2f}mW | On-Chain: PENDING (Background)")
             
-        data = res.json()
-        status = "✅ Verified" if not data.get("is_anomaly") else "🚩 ANOMALY"
-        tx = data.get("tx_hash") or "PENDING"
-        print(f"\n{status} | P: {p}mW | TX: {tx[:12]}...")
     except Exception as e:
         print(f"\n❌ Connection Error: {e}")
 

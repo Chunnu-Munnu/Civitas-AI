@@ -48,27 +48,31 @@ VERIFICATION_ABI = [
     {"inputs":[{"internalType":"address","name":"household","type":"address"},{"internalType":"uint256","name":"kwh","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"},{"internalType":"string","name":"ipfsHash","type":"string"},{"internalType":"bool","name":"isValid","type":"bool"}],"name":"storeVerification","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]
 
-def log_on_chain(household: str, kwh: int, timestamp: int, ipfs_hash: str, is_valid: bool):
+def log_on_chain(household: str, kwh: float, timestamp: int, ipfs_hash: str, is_valid: bool):
     if not CONTRACTS.get("SolarVerification"): return None
     contract = w3.eth.contract(address=CONTRACTS["SolarVerification"], abi=VERIFICATION_ABI)
     
-    nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
-    tx = contract.functions.storeVerification(
-        Web3.to_checksum_address(household),
-        int(kwh * 1000), # Store in mW
-        int(timestamp),
-        ipfs_hash,
-        is_valid
-    ).build_transaction({
-        'from': ACCOUNT_ADDRESS,
-        'nonce': nonce,
-        'gas': 2000000,
-        'gasPrice': w3.to_wei('50', 'gwei')
-    })
-    
-    signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    return w3.to_hex(tx_hash)
+    try:
+        nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
+        tx = contract.functions.storeVerification(
+            Web3.to_checksum_address(household),
+            int(kwh * 1000), 
+            int(timestamp),
+            ipfs_hash,
+            is_valid
+        ).build_transaction({
+            'from': ACCOUNT_ADDRESS,
+            'nonce': nonce,
+            'gas': 2000000,
+            'gasPrice': w3.to_wei('50', 'gwei')
+        })
+        
+        signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        return w3.to_hex(tx_hash)
+    except Exception as e:
+        print(f"⛓️ On-Chain Logging Failed: {e}")
+        return None
 
 Base.metadata.create_all(bind=engine)
 
@@ -88,6 +92,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
+    print(f"💓 Health check at {datetime.datetime.now()}")
     return {"status": "CIVITAS Backend Online", "timestamp": time.time()}
 
 # --- USER ROUTES ---
@@ -143,6 +148,8 @@ def get_dashboard(wallet_address: str, db: Session = Depends(get_db)):
 # --- READING & VERIFICATION ROUTES ---
 @app.post("/api/readings", response_model=ReadingSchema)
 def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    start_time = time.time()
+    print(f"📥 Received Reading: {reading.power}mW from {reading.wallet_address[:8]}...")
     # 0. Find or create user
     user = db.query(User).filter(User.wallet_address == reading.wallet_address).first()
     if not user:
@@ -180,27 +187,32 @@ def create_reading(reading: ReadingCreate, background_tasks: BackgroundTasks, db
 
     # 5. Blockchain Logging (OFF-LOADED TO BACKGROUND)
     def run_blockchain_task(reading_id: int, wallet: str, power: float, is_anom: bool):
-        # Create a new DB session for the background task
+        start_bg = time.time()
+        print(f"⛓️  [BG] Starting On-Chain Task for ID {reading_id}...")
         bg_db = SessionLocal()
         try:
             tx_h = log_on_chain(
                 wallet,
-                power,
+                float(power),
                 int(time.time()),
                 "QmbWqxBEKC3P8tvbrD6Dafv1Mp6fZf2XXYoGawUXGGGvrh",
                 not is_anom
             )
-            # Update the record with the TX hash
-            bg_db.query(Reading).filter(Reading.id == reading_id).update({"blockchain_tx": tx_h})
-            bg_db.commit()
-            print(f"🔒 On-Chain Verification Logged: {tx_h[:12]}...")
+            if tx_h:
+                bg_db.query(Reading).filter(Reading.id == reading_id).update({"blockchain_tx": tx_h})
+                bg_db.commit()
+                print(f"🔒 [BG] TX Logged: {tx_h[:12]}... (Took {time.time() - start_bg:.2f}s)")
+            else:
+                print(f"⚠️  [BG] TX Failed (Check Blockchain Node)")
         except Exception as e:
-            print(f"❌ Blockchain Background Error: {e}")
+            print(f"❌ [BG] Error: {e}")
         finally:
             bg_db.close()
 
-    background_tasks.add_task(run_blockchain_task, new_reading.id, user.wallet_address, reading.power, is_anomaly)
+    background_tasks.add_task(run_blockchain_task, new_reading.id, user.wallet_address, float(reading.power), is_anomaly)
 
+    elapsed = time.time() - start_time
+    print(f"✅ Reading Processed in {elapsed:.4f}s. Returning to client.")
     return {
         "status": "success", 
         "is_anomaly": is_anomaly, 
