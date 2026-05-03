@@ -1,14 +1,15 @@
 fastapi
-uvicorn
+uvicorn[standard]
 sqlalchemy
 pydantic
 scikit-learn
 numpy
 joblib
 requests
+httpx
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
-paho-mqtt
 web3
 python-dotenv
+pyserial

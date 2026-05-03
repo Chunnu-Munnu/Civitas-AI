@@ -1,59 +1,67 @@
-# Node.js
-node_modules/
-dist/
-build/
+# ═══════════════════════════════════════════════════════
+#  CIVITAS AI — Green FinTech Solar Verification System
+# ═══════════════════════════════════════════════════════
+
+# ── Environment / Secrets ────────────────────────────────
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+.env.*.local
+backend/.env
+Blockchain/.env
 
-# Python
+# ── Python ───────────────────────────────────────────────
 venv/
 .venv/
+env/
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+.installed.cfg
 
-# Blockchain / Hardhat
-artifacts/
-cache/
-typechain/
-typechain-types/
-coverage/
-coverage.json
-.openzeppelin/
+# ── Node.js ──────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+.yarn/
+
+# ── Build artifacts ──────────────────────────────────────
+dist/
+build/
+frontend/dist/
+
+# ── Blockchain / Hardhat ─────────────────────────────────
+Blockchain/artifacts/
+Blockchain/cache/
+Blockchain/typechain/
+Blockchain/typechain-types/
+Blockchain/coverage/
+Blockchain/coverage.json
+Blockchain/.openzeppelin/
+Blockchain/node_modules/
+
+# ── Databases (regenerated at runtime) ───────────────────
 *.db
+*.sqlite
+*.sqlite3
+backend/civitas.db
+backend/verified_readings.db
 
-# OS / IDE
+# ── OS / IDE ─────────────────────────────────────────────
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# Project specific
-backend/civitas.db
-backend/verified_readings.db
-frontend/dist/
+# ── Misc ─────────────────────────────────────────────────
+*.log
+.sixth/
+*.pdf

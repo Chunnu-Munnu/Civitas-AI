@@ -1,71 +1,87 @@
 import numpy as np
-from sklearn.ensemble import IsolationForest, RandomForestRegressor
-import joblib
-import os
-import requests
-from datetime import datetime
+from sklearn.ensemble import IsolationForest
+import threading
+import time
+
+# Rolling buffer of real readings for self-training
+_training_buffer = []
+_lock = threading.Lock()
 
 class CIVITASML:
     def __init__(self):
-        self.anomaly_detector = IsolationForest(contamination=0.05, random_state=42)
-        self.generation_predictor = RandomForestRegressor(n_estimators=100, random_state=42)
+        self.anomaly_detector = IsolationForest(
+            n_estimators=100,
+            contamination=0.03,   # was 0.05 — lowered to reduce false positives on sparse data
+            random_state=42
+        )
         self.anomaly_trained = False
-        self.predictor_trained = False
-        self.nasa_api_url = "https://power.larc.nasa.gov/api/temporal/daily/point"
+        self._start_retrain_loop()
 
-    def get_nasa_irradiance(self, lat, lon):
-        """Fetch real-time solar irradiance for cross-validation"""
-        try:
-            today = datetime.now().strftime("%Y%m%d")
-            params = {
-                "parameters": "ALLSKY_SFC_SW_DWN",
-                "community": "RE",
-                "longitude": lon,
-                "latitude": lat,
-                "start": today,
-                "end": today,
-                "format": "JSON"
-            }
-            response = requests.get(self.nasa_api_url, params=params, timeout=5)
-            data = response.json()
-            # Extract irradiance (kW-hr/m^2/day)
-            return data['properties']['parameter']['ALLSKY_SFC_SW_DWN'][today]
-        except Exception as e:
-            print(f"NASA API Error: {e}")
-            return 0.5 # Default fallback irradiance
+    # ── Physics bounds ──────────────────────────────────────────────
+    # Single solar cell: Voc ≈ 0.6–1.0V, absolute max ~1.5V
+    # Set to 2.0V to catch fake-grid injection (24V) without false-flagging real panels
+    VOLTAGE_MAX = 2.0      # V  — single cell can't exceed this
+    VOLTAGE_MIN = 0.0      # V
+    CURRENT_MAX = 0.05     # A  — 50mA max for small panel
+    POWER_MAX   = 0.1      # W  — 100mW max
 
-    def predict_expected_gen(self, panel_capacity, time_of_day, irradiance):
-        if not self.predictor_trained:
-            # Physical formula: Output = Capacity * Irradiance * Efficiency * Correction
-            # Efficiency ~15%, Correction ~0.7
-            return panel_capacity * irradiance * 0.15 * 0.7 
-        return self.generation_predictor.predict([[panel_capacity, time_of_day, irradiance]])[0]
+    # ML only activates after enough clean readings to avoid early false positives
+    ML_MIN_SAMPLES = 50    # was 20 — 0.3mA spikes were flagged with too few samples
 
+    def _physics_check(self, voltage, current, power):
+        if voltage > self.VOLTAGE_MAX:
+            return -1, f"Physics: voltage {voltage:.2f}V exceeds solar max ({self.VOLTAGE_MAX}V) — grid injection?"
+        if voltage < 0 or current < 0 or power < 0:
+            return -1, "Physics: negative sensor value"
+        if current > self.CURRENT_MAX:
+            return -1, f"Physics: current {current*1000:.2f}mA exceeds solar max ({self.CURRENT_MAX*1000:.0f}mA)"
+        if power > self.POWER_MAX:
+            return -1, f"Physics: power {power*1000:.2f}mW exceeds panel rating ({self.POWER_MAX*1000:.0f}mW)"
+        return 1, None
+
+    # ── ML detection ────────────────────────────────────────────────
     def detect_anomaly(self, voltage, current, power):
-        # Physics-based fraud detection
-        if voltage > 2.0:
-            return -1 # Fraud (Fake Grid)
-        
-        # ML-based statistical anomaly detection
-        if self.anomaly_trained:
-            pred = self.anomaly_detector.predict([[voltage, current, power]])
-            return pred[0]
-        
-        # Default pass if voltage is within solar range
-        if 0.0 < voltage < 1.5:
-            return 1
-            
-        return 1
+        """Returns (label, reason) where label: 1=normal, -1=anomaly"""
+        label, reason = self._physics_check(voltage, current, power)
+        if label == -1:
+            return -1, reason
 
-    def train_anomaly(self, data):
-        self.anomaly_detector.fit(data)
-        self.anomaly_trained = True
+        if self.anomaly_trained and len(_training_buffer) >= self.ML_MIN_SAMPLES:
+            features = [[voltage, current, power]]
+            pred = self.anomaly_detector.predict(features)
+            if pred[0] == -1:
+                score = self.anomaly_detector.score_samples(features)[0]
+                return -1, f"ML Isolation Forest: anomaly score {score:.3f}"
 
+        # Add to training buffer (only on 'likely-normal' readings)
+        with _lock:
+            _training_buffer.append([voltage, current, power])
+            if len(_training_buffer) > 5000:
+                _training_buffer.pop(0)
+
+        return 1, None
+
+    # ── Self-retraining loop ─────────────────────────────────────────
+    def _retrain(self):
+        while True:
+            time.sleep(30)
+            with _lock:
+                buf = list(_training_buffer)
+            if len(buf) >= self.ML_MIN_SAMPLES:
+                try:
+                    self.anomaly_detector.fit(buf)
+                    self.anomaly_trained = True
+                    print(f"🤖 ML Model retrained on {len(buf)} samples")
+                except Exception as e:
+                    print(f"⚠️ Retrain error: {e}")
+
+    def _start_retrain_loop(self):
+        t = threading.Thread(target=self._retrain, daemon=True)
+        t.start()
+
+# ── Singleton ────────────────────────────────────────────────────────
 ml_service = CIVITASML()
 
-# Top-level exports for main.py
 def detect_anomaly(voltage, current, power):
+    """Returns (int_label, reason_str). label=-1 means anomaly."""
     return ml_service.detect_anomaly(voltage, current, power)
-
-def predict_generation(panel_capacity, time_of_day, irradiance):
-    return ml_service.predict_expected_gen(panel_capacity, time_of_day, irradiance)
